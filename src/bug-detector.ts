@@ -157,7 +157,7 @@ Return a valid JSON object with this structure:
       "confidenceJustification": "Why this confidence score was chosen",
       "severity": "low" | "medium" | "high" | "critical",
       "severityJustification": "Why this severity level was chosen",
-      "suggestedFix": "Exact code fix with proper indentation",
+      "suggestedFix": "The exact code that should replace the buggy code. Do not include explanatory text - only include the actual code that should be used to fix the bug. The code must be properly formatted and indented.",
       "lineStart": <number>,
       "lineEnd": <number>
     }
@@ -168,9 +168,9 @@ Return a valid JSON object with this structure:
 
 1. Quality Standards:
    - Only report issues with concrete evidence
-   - Provide specific, actionable fixes
-   - Include all required fields
-   - Maintain code style in fixes
+   - For suggestedFix, provide ONLY the exact replacement code
+   - The suggestedFix must be valid, compilable code
+   - Maintain exact indentation in suggestedFix
    - Focus on significant issues
 
 2. False Positive Prevention:
@@ -182,10 +182,17 @@ Return a valid JSON object with this structure:
 
 3. Response Requirements:
    - Return valid JSON only
-   - No markdown or formatting
+   - No markdown or formatting in suggestedFix
    - No natural language in fixes
    - Empty bugReports for no issues
    - Complete all required fields
+
+4. Code Fix Requirements:
+   - suggestedFix must contain only the actual code to replace the bug
+   - No explanatory text or comments in suggestedFix
+   - Maintain proper indentation and formatting
+   - Fix must be complete and valid code
+   - Fix must address the root cause of the bug
 
 IMPORTANT: Return ONLY valid JSON. No other text, no markdown, no code blocks.`
 

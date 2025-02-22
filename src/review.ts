@@ -536,26 +536,30 @@ ${
 
       // Run bug detection first
       let bugReports: BugReport[] = []
-      for (const [, , patch] of patches) {
-        const reports = await detectBugs(
-          heavyBot,
-          ins,
-          options,
-          filename,
-          fileContent,
-          patch
-        )
-        bugReports = [...bugReports, ...reports]
-      }
+      // Combine all patches into one for bug detection
+      const combinedPatch = patches
+        .map(([, , patch]) => patch)
+        .join('\n---patch_separator---\n')
+      const reports = await detectBugs(
+        heavyBot,
+        ins,
+        options,
+        filename,
+        fileContent,
+        combinedPatch
+      )
+      bugReports = reports
 
       // Track which lines have bug reports with a buffer range
       const BUFFER_LINES = 2 // Lines of buffer above and below bug report
       const linesWithBugReports = new Set<number>()
       for (const report of bugReports) {
         // Add the bug report lines plus buffer range
-        for (let line = Math.max(1, report.lineStart - BUFFER_LINES); 
-             line <= report.lineEnd + BUFFER_LINES; 
-             line++) {
+        for (
+          let line = Math.max(1, report.lineStart - BUFFER_LINES);
+          line <= report.lineEnd + BUFFER_LINES;
+          line++
+        ) {
           linesWithBugReports.add(line)
         }
       }
@@ -684,7 +688,9 @@ ${commentChain}
             for (let line = review.startLine; line <= review.endLine; line++) {
               if (linesWithBugReports.has(line)) {
                 hasOverlappingBugReport = true
-                info(`Skipping review comment at lines ${review.startLine}-${review.endLine} due to nearby bug report`)
+                info(
+                  `Skipping review comment at lines ${review.startLine}-${review.endLine} due to nearby bug report`
+                )
                 break
               }
             }
