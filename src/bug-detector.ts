@@ -1,8 +1,7 @@
 import type {Bot} from './bot'
 import type {Inputs} from './inputs'
 import type {Options} from './options'
-import path from 'node:path'
-import fs from 'node:fs/promises'
+import {debug, warning} from '@actions/core'
 
 export interface BugReport {
   description: string
@@ -22,114 +21,190 @@ export async function detectBugs(
   fileContent: string,
   patch: string
 ): Promise<BugReport[]> {
-  // Get related files for context
-  const relatedFiles = await getRelatedFiles(filePath, options)
-  const projectContext = await buildProjectContext(relatedFiles)
-  
-  const bugDetectionPrompt = `## GitHub PR Title
+  const bugDetectionPrompt = `${options.systemMessage}
 
-\`$title\` 
+## Configuration Context
+- Language: ${options.language}
+
+## GitHub PR Title
+
+\`${inputs.title}\` 
 
 ## Description
 
 \`\`\`
-$description
+${inputs.description}
 \`\`\`
 
-## Project Context
+## File Information
+- Filename: ${inputs.filename || filePath}
+- Language: ${options.language}
 
-${projectContext}
-
-## File Context
-
-File: \`${filePath}\`
-
+## File Content Context
+Original Content:
 \`\`\`
-${fileContent}
+${inputs.fileContent || fileContent}
 \`\`\`
 
-## Changes to Review
-
-\`\`\`diff
-${patch}
+## Diff Information
+File Diff Overview:
+\`\`\`
+${inputs.fileDiff || patch}
 \`\`\`
 
-## IMPORTANT Instructions
+Detailed Patches:
+\`\`\`
+${inputs.patches || '(No additional patch information available)'}
+\`\`\`
 
-You are a highly skilled code reviewer focused on detecting potential bugs and issues. Your task is to thoroughly analyze the code changes for any bugs, issues, or problematic patterns that could cause problems.
+Additional Diff Context:
+\`\`\`
+${
+  inputs.diff !== 'no diff'
+    ? inputs.diff
+    : '(No additional diff context available)'
+}
+\`\`\`
 
-Focus Areas:
+## Review Context
+${
+  inputs.comment !== 'no comment provided'
+    ? `
+Current Comment:
+\`\`\`
+${inputs.comment}
+\`\`\`
+`
+    : ''
+}
 
-1. Logic and Edge Cases
+## Comment Chain Context
+${
+  inputs.commentChain !== 'no other comments on this patch'
+    ? `
+Previous Comments:
+\`\`\`
+${inputs.commentChain}
+\`\`\`
+`
+    : '(No previous comments on this patch)'
+}
+
+## Raw Summary
+${
+  inputs.rawSummary
+    ? `
+\`\`\`
+${inputs.rawSummary}
+\`\`\`
+`
+    : '(No raw summary available)'
+}
+
+## Short Summary
+${
+  inputs.shortSummary
+    ? `
+\`\`\`
+${inputs.shortSummary}
+\`\`\`
+`
+    : '(No short summary available)'
+}
+
+## Bug Detection Instructions
+
+You are a specialized code analyzer focused on detecting potential bugs and issues. Your task is to analyze the code changes for bugs that could impact reliability, security, or correctness.
+
+Review Strategy:
+${
+  options.reviewSimpleChanges
+    ? '- Review all changes thoroughly, including simple ones'
+    : '- Focus on complex changes and potential issues'
+}
+${
+  options.reviewCommentLGTM
+    ? '- Include LGTM comments for good code'
+    : '- Skip LGTM comments for good code'
+}
+
+Context Analysis:
+1. File Content Context
+   - Analyze how changes interact with existing code structure
+   - Consider imports, dependencies, and module relationships
+   - Check for consistency with existing patterns and conventions
+   - Verify changes maintain type safety and interface contracts
+
+2. Diff Context
+   - Examine changes in relation to surrounding code
+   - Verify modifications preserve existing functionality
+   - Check for unintended side effects on dependent code
+   - Ensure changes handle all edge cases
+
+3. PR Context
+   - Consider the PR description and purpose
+   - Review related comment chains for context
+   - Check if changes align with PR objectives
+   - Verify changes address any mentioned issues
+
+Key Areas to Check:
+1. Logic & Control Flow
    - Off-by-one errors
-   - Incorrect boolean conditions
+   - Incorrect boolean logic
    - Missing null/undefined checks
-   - Array bounds issues
-   - Incorrect loop termination
+   - Improper error handling
    - Race conditions in async code
-   - Missing error handling
-   - Unhandled edge cases
-   - State management issues
    - Incorrect assumptions about input data
+   - State management issues
 
-2. Integration Issues
-   - Incorrect function parameter usage
+2. Data & Type Safety
    - Type mismatches
-   - Breaking changes to interfaces/APIs
-   - Inconsistent state updates
-   - Missing or incorrect error propagation
-   - Problems with how the changed code interacts with existing code
-
-3. Runtime and Performance
+   - Unsafe type coercion
+   - Missing data validation
+   - Buffer overflows
    - Memory leaks
-   - Infinite loops
-   - Blocking operations
-   - Inefficient algorithms
+   - Breaking changes to interfaces/APIs
+   - Incorrect function parameter usage
+
+3. Security & Best Practices
+   - Input validation gaps
+   - SQL injection risks
+   - XSS vulnerabilities
+   - Insecure data exposure
+   - Broken authentication
    - Resource cleanup issues
-   - Unnecessary computations
    - Potential deadlocks
 
-4. Data Flow and Security
-   - Incorrect data transformations
-   - Data loss scenarios
-   - Race conditions
-   - Inconsistent state
-   - Missing validation
-   - Security vulnerabilities
+Severity Guidelines:
+- critical: System crash, data loss, security breach (e.g. SQL injection, auth bypass)
+- high: Incorrect behavior in common cases (e.g. null pointer, type error)
+- medium: Edge case failures (e.g. off-by-one, boundary condition)
+- low: Code quality issues (e.g. memory inefficiency, minor logic flaw)
 
-## Response Format
-
-You must respond with a valid JSON object in this exact format:
+Response Format (JSON only):
 {
-  "analysis": "Your detailed analysis of the code and explanation of any issues found",
   "bugReports": [
     {
-      "description": "Clear explanation of why this could cause problems",
-      "confidence": <number 0-100>,
-      "severity": "low" | "medium" | "high" | "critical",
-      "suggestedFix": "The exact code that should replace the problematic lines, with proper indentation preserved",
-      "lineStart": <line number>,
-      "lineEnd": <line number>
+      "description": "Clear explanation of the bug and its potential impact",
+      "confidence": <0-100>,
+      "severity": "low|medium|high|critical",
+      "suggestedFix": "Exact replacement code that matches the codebase style",
+      "lineStart": <number>,
+      "lineEnd": <number>
     }
   ]
 }
 
-## Important Guidelines
-
-- Focus on both obvious bugs AND subtle logic issues that could cause problems
-- Consider all possible edge cases and execution paths
-- For each bug, provide the exact code that should replace the problematic lines
-- If the fix is to remove code, leave suggestedFix as an empty string
-- Preserve the exact indentation and code style when suggesting fixes
-- The fix should only include the specific lines that need to change
-- Do not include natural language instructions in the suggestedFix
-- If no bugs are found, provide your analysis explaining why and return an empty bugReports array
-- Pay special attention to assumptions made about input data or system state
-- Assign severity levels based on potential impact:
-  - critical: Could cause system crashes, data loss, or security breaches
-  - high: Likely to cause incorrect behavior in common scenarios
-  - medium: Could cause issues in edge cases or specific conditions
-  - low: Minor issues that are unlikely to cause serious problems
+Guidelines:
+- Focus on concrete bugs, not style issues
+- Consider the full context including PR description and project files
+- Analyze how changes interact with existing code
+- Provide exact code fixes that match the codebase style
+- Set confidence based on certainty of the bug
+- Return empty bugReports if no bugs found
+- Keep fixes minimal and targeted
+- Pay special attention to security implications
+- Consider edge cases and error conditions
 
 IMPORTANT: Return ONLY valid JSON. No other text, no markdown, no code blocks.`
 
@@ -140,26 +215,29 @@ IMPORTANT: Return ONLY valid JSON. No other text, no markdown, no code blocks.`
       .replace(/---old_hunk---\n/g, '')
       .trim()
 
-    const [response] = await bot.chat(bugDetectionPrompt, {})
+    const [response] = await bot.chat(
+      bugDetectionPrompt.replace('${patch}', cleanedPatch),
+      {}
+    )
 
     if (!response || !response.trim()) {
-      console.warn('Bug detector received empty response')
+      warning('Bug detector received empty response')
       return []
     }
 
     try {
       // Log the raw response for debugging
       if (options.debug) {
-        console.debug('Raw bot response:', response)
+        debug(`Raw bot response: ${response}`)
       }
 
       // Extract the text content from various response formats
       let textToProcess = response
       if (typeof response === 'object' && response !== null) {
         interface MessageResponse {
-          message?: { content?: string }
+          message?: {content?: string}
           text?: string
-          detail?: { choices?: Array<{ message?: { content?: string } }> }
+          detail?: {choices?: Array<{message?: {content?: string}}>}
         }
 
         const typedResponse = response as MessageResponse
@@ -170,28 +248,24 @@ IMPORTANT: Return ONLY valid JSON. No other text, no markdown, no code blocks.`
         } else if (typedResponse.detail?.choices?.[0]?.message?.content) {
           textToProcess = typedResponse.detail.choices[0].message.content
         } else {
-          console.error('Unexpected response format:', response)
+          warning(`Unexpected response format: ${JSON.stringify(response)}`)
           return []
         }
       }
 
       // Strip any markdown code block syntax before parsing
-      textToProcess = textToProcess.trim()
+      textToProcess = textToProcess
+        .trim()
         .replace(/^```(?:json)?\n/, '') // Remove opening code block
-        .replace(/\n```$/, '')          // Remove closing code block
+        .replace(/\n```$/, '') // Remove closing code block
         .trim()
 
       // Parse the response as JSON
       const parsedResponse = JSON.parse(textToProcess)
-      
-      // Log the analysis for debugging
-      if (options.debug) {
-        console.debug('Analysis:', parsedResponse.analysis)
-      }
 
       // Return the bug reports
       const bugReports = parsedResponse.bugReports || []
-      
+
       // Validate each report has required fields and proper code formatting
       const validReports = bugReports.filter((report: BugReport) => {
         const isValid =
@@ -206,104 +280,28 @@ IMPORTANT: Return ONLY valid JSON. No other text, no markdown, no code blocks.`
           report.lineStart <= report.lineEnd
 
         if (!isValid && options.debug) {
-          console.warn('Invalid bug report:', report)
+          warning(`Invalid bug report: ${JSON.stringify(report)}`)
         }
         return isValid
       })
+
+      if (options.debug) {
+        debug(`Found ${validReports.length} valid bug reports`)
+      }
 
       return validReports.map((report: BugReport) => ({
         ...report,
         filePath
       }))
     } catch (error) {
-      console.error('Failed to parse bug detector response:', error)
+      warning(`Failed to parse bug detector response: ${error}`)
       if (options.debug) {
-        console.error('Raw response:', response)
+        warning(`Raw response: ${response}`)
       }
       return []
     }
   } catch (error) {
-    console.error('Error during bug detection:', error)
+    warning(`Error during bug detection: ${error}`)
     return []
   }
-}
-
-// Helper function to get related files
-async function getRelatedFiles(filePath: string, options: Options): Promise<Map<string, string>> {
-  const relatedFiles = new Map<string, string>()
-  
-  try {
-    // Get imports and dependencies from the file
-    const fileImports = await extractImports(filePath)
-    
-    // Get files in the same directory
-    const dirPath = path.dirname(filePath)
-    const dirFiles = await fs.readdir(dirPath)
-    
-    // Add related files to the map
-    for (const file of [...fileImports, ...dirFiles]) {
-      if (options.checkPath(file)) {
-        try {
-          const content = await fs.readFile(file, 'utf8')
-          relatedFiles.set(file, content)
-        } catch (error) {
-          console.warn(`Could not read file ${file}:`, error)
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Error getting related files:', error)
-  }
-  
-  return relatedFiles
-}
-
-// Helper function to build project context string
-async function buildProjectContext(files: Map<string, string>): Promise<string> {
-  let context = '### Related Files\n\n'
-  
-  for (const [file, content] of files.entries()) {
-    context += `File: \`${file}\`\n\n\`\`\`\n${content}\n\`\`\`\n\n`
-  }
-  
-  return context
-}
-
-// Helper function to extract imports from a file
-async function extractImports(filePath: string): Promise<string[]> {
-  const imports: string[] = []
-  try {
-    const content = await fs.readFile(filePath, 'utf8')
-    
-    // Extract TypeScript/JavaScript imports
-    const importRegex = /import.*from\s+['"](.+)['"]/g
-    let match: RegExpExecArray | null = null
-    match = importRegex.exec(content)
-    while (match) {
-      if (match[1] && !match[1].startsWith('.')) {
-        match = importRegex.exec(content)
-        continue // Skip external imports
-      }
-      const importPath = path.resolve(path.dirname(filePath), match[1])
-      imports.push(importPath)
-      match = importRegex.exec(content)
-    }
-    
-    // Extract require statements
-    const requireRegex = /require\(['"](.+)['"]\)/g
-    match = requireRegex.exec(content)
-    while (match) {
-      if (match[1] && !match[1].startsWith('.')) {
-        match = requireRegex.exec(content)
-        continue // Skip external imports
-      }
-      const importPath = path.resolve(path.dirname(filePath), match[1])
-      imports.push(importPath)
-      match = requireRegex.exec(content)
-    }
-  } catch (error) {
-    console.warn(`Error extracting imports from ${filePath}:`, error)
-  }
-  
-  return imports
 }
